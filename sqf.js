@@ -1,4 +1,4 @@
-#ds colors SQF script keywords lookup based on SQF extension by Armitxes (https://marketplace.visualstudio.com/items?itemName=Armitxes.sqf) 
+#ds colors SQF script keywords lookup based on SQF extension by Armitxes (https://marketplace.visualstudio.com/items?itemName=Armitxes.sqf)
 
 const COLOR_BRIGHT_GREEN = '\x1b[1m\x1b[32m',
     COLOR_BRIGHT_BLUE = '\x1b[1m\x1b[34m',
@@ -10,6 +10,39 @@ let DATA, DATA_CATS, DATA_CATS_SIZE;
 
 const REGEX_FILENAME_VSIX = /armitxes\.sqf.*\.vsix/i; //e.g.: 'Armitxes.sqf-2.0.3.vsix';
 const sfs = require('scopedfs');
+
+#ts
+const sqf = require('sqf-formatter');
+#end
+
+//
+// sqf-formatter stuff/shims
+//
+class Range {
+    start = 0;
+    end = 0;
+    constructor(s, e)
+    {
+        this.start = s;
+        this.end = e;
+    }
+}
+class Doc {
+    code = '';
+    constructor(code)
+    {
+        this.code = code.replaceAll(';', ';\n')
+            //quick hack to separate comment from if-statement like: //do this if (cond) {
+            .replaceAll('if ', '\nif ');
+    }
+    getText() { return this.code; }
+    getRange() { return new Range(0, this.code.length); }
+};
+function prettifySqf(code)
+{
+    const doc = new Doc(code);
+    return sqf.pretty(doc, doc.getRange())[0];
+}
 
 //try to extract from .vsix
 async function extractDataFromVsix()
@@ -77,10 +110,11 @@ function run()
             setImmediate(ask);
         });
     }
-    
+
     DATA_CATS = Object.keys(DATA);
     DATA_CATS_SIZE = DATA_CATS.length;
     console.log("Usage: node sqf [search terms (case insensitive)...]");
+    console.log("       Use 'quotes' for exact match only; o.w. partial matches are shown");
     if (process.argv.length >= 3)
     {
         for (let i = 2; i < process.argv.length; ++i)
@@ -88,14 +122,46 @@ function run()
             find(process.argv[i]);
         }
     }
-    ask();    
+    ask();
+}
+
+//Pretty print info. E.g. print multiline example separately, instead of single string in JSON
+//data: JSON containing info on a keyword
+function printEntry(data, kw)
+{
+    data.url = `https://community.bistudio.com/wiki/${kw}`; //let's just assume its URL
+    //'compress' tiny info morsels into single line for compactness
+    const s = 'local:'.bold.cyan + data.local + ', server:'.bold.cyan + data.server
+         + ', broadcasted:'.bold.cyan + data.broadcasted + ', reviewLevel:' + data.reviewLevel;
+    const print = Object.assign({}, data);
+    delete print.local;
+    delete print.server;
+    delete print.broadcasted;
+    delete print.reviewLevel;
+    const example = prettifySqf(data.example),
+        printEgSeparately = example.split('\n').length > 1; //print multilines separately
+    if (printEgSeparately)
+        delete print.example;
+    console.log(print, s);
+    if (printEgSeparately)
+    {
+        console.log('---Example---'.bold.cyan);
+        console.log(example);
+        console.log('---');
+    }
 }
 
 //search for given 'key' - can be partial
 function find(key)
 {
-    key = key.toLowerCase();
+    key = key.trim().toLowerCase();
     console.log(`Searching for ${key}...`);
+    const exactMatchOnly = (key[0] === '"') || (key[0] === "'");
+    if (exactMatchOnly && (key.length >= 2))
+    {
+        key = key.substring(1, key.length - 1);
+        console.log('(Exact match only)'.bold.debug);
+    }
     let numFound = 0;
     const found = [];
     DATA_CATS.forEach((cat) => {
@@ -109,9 +175,9 @@ function find(key)
                 ++numFound;
                 found.push(kw);
                 console.log(`${COLOR_BRIGHT_GREEN}${key}${COLOR_RESET} is in ${COLOR_BRIGHT_BLUE}${cat}${COLOR_RESET}`);
-                console.log(entries[kw]);
+                printEntry(entries[kw], kw);
             }
-            else if (i >= 0)
+            else if (!exactMatchOnly && (i >= 0))
             {
                 ++numFound;
                 found.push(kw);
@@ -124,7 +190,7 @@ function find(key)
                     s += kw.substring(j);
                     console.log(`${COLOR_BRIGHT_GREEN}${key}${COLOR_RESET} maybe ${s} in ${COLOR_BRIGHT_BLUE}${cat}${COLOR_RESET}`);
                     //console.log(`${COLOR_BRIGHT_GREEN}${key}${COLOR_RESET} maybe ${COLOR_BRIGHT_GREEN}${kw}${COLOR_RESET} in \x1b[1m\x1b[34m${cat}${COLOR_RESET}`);
-                console.log(entries[kw]);
+                printEntry(entries[kw], kw);
             }
         });
     });
